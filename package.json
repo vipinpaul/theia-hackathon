@@ -18,8 +18,8 @@
 		"lerna": "2.4.0"
 	},
 	"workspaces": [
-		"obs-app",
-		"extension2",
+		"obs-extension",
+		"audio-extension",
 		"browser-app",
 		"electron-app"
 	]

@@ -1,5 +1,5 @@
 {
-  "name": "obs-app",
+  "name": "obs-extension",
   "keywords": [
     "theia-extension"
   ],
@@ -23,7 +23,7 @@
   },
   "theiaExtensions": [
     {
-      "frontend": "lib/browser/obs-app-frontend-module"
+      "frontend": "lib/browser/obs-extension-frontend-module"
     }
   ]
 }

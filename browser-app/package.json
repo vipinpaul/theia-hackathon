@@ -14,7 +14,7 @@
     "@theia/process": "latest",
     "@theia/terminal": "latest",
     "@theia/workspace": "latest",
-    "obs-app": "0.0.0"
+    "obs-extension": "0.0.0"
   },
   "devDependencies": {
     "@theia/cli": "latest"
