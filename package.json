@@ -20,6 +20,9 @@
 	"workspaces": [
 		"obs-extension",
 		"audio-extension",
+		"OBSExplorer",
+		"OBSEditorWidget",
+		"BibleExplorer",
 		"browser-app",
 		"electron-app"
 	]

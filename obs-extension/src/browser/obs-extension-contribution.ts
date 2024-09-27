@@ -1,7 +1,73 @@
-import { injectable } from '@theia/core/shared/inversify';
-
+import { inject, injectable } from '@theia/core/shared/inversify';
+import { MenuModelRegistry } from '@theia/core';
+import { ObsExtensionWidget } from './obs-extension-widget';
+import { AbstractViewContribution, WidgetManager } from '@theia/core/lib/browser';
+import { Command, CommandRegistry } from '@theia/core/lib/common/command';
+// import {BibleExplorerWidget} from 'BibleExplorer/src/browser/BibleExplorer-widget'
+export const WidgetCommand: Command = { id: 'widget:command' };
 @injectable()
 // Add contribution interface to be implemented, e.g. "ObsExtensionContribution implements CommandContribution"
-export class ObsExtensionContribution{
+export class ObsExtensionContribution  extends AbstractViewContribution<ObsExtensionWidget>{constructor() {
+    super({
+        widgetId: ObsExtensionWidget.ID,
+        widgetName: ObsExtensionWidget.LABEL,
+        defaultWidgetOptions: { area: 'left' },
+        toggleCommandId: WidgetCommand.id
+    });
+}
+
+@inject(WidgetManager) protected readonly widgetManager: WidgetManager;  // Inject WidgetManager to control widgets
+
+/**
+ * Example command registration to open the widget from the menu, and quick-open.
+ * For a simpler use case, it is possible to simply call:
+ ```ts
+    super.registerCommands(commands)
+ ```
+ *
+ * For more flexibility, we can pass `OpenViewArguments` which define 
+ * options on how to handle opening the widget:
+ * 
+ ```ts
+    toggle?: boolean
+    activate?: boolean;
+    reveal?: boolean;
+ ```
+ *
+ * @param commands
+ */
+registerCommands(commands: CommandRegistry): void {
+    commands.registerCommand(WidgetCommand, {
+        execute: () => this.openDataWidget()  
+    });
+}
+
+async openDataWidget(): Promise<void> {
+    super.openView({ activate: false, reveal: true })
+  
+
+}
+
+
+
+
+/**
+ * Example menu registration to contribute a menu item used to open the widget.
+ * Default location when extending the `AbstractViewContribution` is the `View` main-menu item.
+ * 
+ * We can however define new menu path locations in the following way:
+ ```ts
+    menus.registerMenuAction(CommonMenus.HELP, {
+        commandId: 'id',
+        label: 'label'
+    });
+ ```
+ * 
+ * @param menus
+ */
+registerMenus(menus: MenuModelRegistry): void {
+    super.registerMenus(menus);
+}
+
 
 }
