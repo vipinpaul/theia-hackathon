@@ -16,10 +16,8 @@
     "@theia/process": "latest",
     "@theia/terminal": "latest",
     "@theia/workspace": "latest",
-    "obs-extension": "0.0.0",
     "OBSEditorWidget": "0.0.0",
-    "OBSExplorer": "0.0.0",
-    "BibleExplorer": "0.0.0"
+    "OBSExplorer": "0.0.0"
   },
   "devDependencies": {
     "@theia/cli": "latest",

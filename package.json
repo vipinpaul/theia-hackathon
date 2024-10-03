@@ -18,11 +18,9 @@
 		"lerna": "2.4.0"
 	},
 	"workspaces": [
-		"obs-extension",
 		"audio-extension",
 		"OBSExplorer",
 		"OBSEditorWidget",
-		"BibleExplorer",
 		"browser-app",
 		"electron-app"
 	]
