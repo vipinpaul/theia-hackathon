@@ -11,10 +11,6 @@ export class Texttospeech {
 		@inject(MessageService) private readonly messageService: MessageService,
 	) {}
 
-	// let bodyContent = JSON.stringify([
-	// 	'आदि में वचन था, और वचन परमेश्वर के साथ था, और वचन परमेश्वर था।',
-	// ]);
-
 	downloadAudioFile = async (jobId: any) => {
 		try {
 			const downloadUrl = `https://api.vachanengine.org/v2/ai/assets?job_id=${jobId}`;
@@ -55,19 +51,26 @@ export class Texttospeech {
 					method: 'GET',
 					headers: this.headersList,
 				});
+				console.log('Response', await response);
 
 				let result = await response.json();
-				console.log(result, 'Job Status');
+				console.log(
+					JSON.stringify(result),
+					result.data.status,
+					'Job Status',
+				);
 
-				if (result.data.status === 'FINISHED') {
-					this.messageService.info(
-						'Job is finished! Preparing to download the audio...',
-					);
+				if (result.data.status === 'job finished') {
+					// this.messageService.info(
+					// 	'Job is finished! Preparing to download the audio...',
+					// );
 					console.log(
 						'Job is finished! Preparing to download the audio...',
 					);
 
 					this.downloadAudioFile(jobId);
+					// this.downloadAudioFile(377);
+
 					break;
 				} else if (result.data.status === 'failed') {
 					console.error('Job failed.');
