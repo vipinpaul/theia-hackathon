@@ -5,78 +5,108 @@ import {
 } from "@theia/core/shared/inversify";
 import { ReactWidget } from "@theia/core/lib/browser/widgets/react-widget";
 import React = require("react");
-// import { fetchData } from './textTospeech';
-import { Texttospeech } from "audio-extension/lib/browser/Texttospeech";
-// import { marked } from 'marked';
 import { MessageService } from "@theia/core";
+import { FFmpegServer } from "../common/audio-backend-service";
+import { Texttospeech } from "audio-extension/lib/browser/Texttospeech";
+
 @injectable()
 export class OBSWidget extends ReactWidget {
   static readonly ID = "obs-widget";
   static readonly LABEL = "OBS Widget";
 
-  protected storyTitle: string = "01"; // default title
-  // protected markdownContent: string = ''; // Markdown content
-  protected isLoading: boolean = true; // Loading state
-  public obsStory: [any];
+  @inject(FFmpegServer)
+  protected readonly server: FFmpegServer;
+
   @inject(MessageService)
   protected readonly messageService!: MessageService;
+
+  protected storyTitle: string = "01";
+  protected isLoading: boolean = true;
+  protected isRecording: boolean = false;
+  protected recordingStoryId: number | null = null;
+  protected recordingPart: string | null = null;
+  public obsStory: any[] = [];
+
   public TTSinstance = new Texttospeech(this.messageService);
+  protected showDevicePopup: boolean = false;
+  protected availableDevices: string[] = [];
+
   @postConstruct()
   protected init(): void {
     this.id = OBSWidget.ID;
     this.title.label = OBSWidget.LABEL;
     this.title.caption = OBSWidget.LABEL;
     this.title.closable = true;
-    this.title.iconClass = "fa fa-file"; // Icon for the widget
-
-    this.update(); // Trigger the initial rendering
+    this.title.iconClass = "fa fa-file";
+    this.update();
   }
 
   protected async onAfterAttach(): Promise<void> {
-    this.isLoading = true; // Set loading state to true
-    this.obsStory = await this.fetchStoryContent(this.storyTitle); // Fetch initial content
-    console.log("this.obsStory", this.obsStory);
+    this.isLoading = true;
+    this.obsStory = await this.fetchStoryContent(this.storyTitle);
+    this.isLoading = false;
+    this.update();
+  }
 
-    this.isLoading = false; // Set loading state to false
-    this.update(); // Update the widget view
+  async toggleRecording(
+    storyId: number,
+    partType: "title" | "text" | "end"
+  ): Promise<void> {
+    try {
+      const filename = `${this.storyTitle}-${storyId}`;
+
+      const isCurrentlyRecording =
+        this.recordingStoryId === storyId && this.recordingPart === partType;
+
+      if (isCurrentlyRecording) {
+        await this.server.stopRecording();
+        this.isRecording = false;
+        this.recordingStoryId = null;
+        this.recordingPart = null;
+      } else {
+        if (this.isRecording) {
+          await this.server.stopRecording();
+        }
+        await this.server.startRecording({ storyId, filename });
+        this.isRecording = true;
+        this.recordingStoryId = storyId;
+        this.recordingPart = partType;
+      }
+      this.update();
+    } catch (error) {
+      console.error("Recording error:", error);
+    }
   }
 
   setStoryTitle(title: string): void {
     this.storyTitle = title;
     this.fetchStoryContent(title).then((content) => {
-      console.log(content);
-
-      this.obsStory = content; // Update the markdown content
-      this.update(); // Trigger re-render
+      this.obsStory = content;
+      this.update();
     });
   }
-  MdToJson = (data: string) => {
-    //convert md file text into json object
-    //render story from json array object
+
+  MdToJson(data: string) {
     let story: any = [];
-    let id: number = 0;
+    let id = 0;
     const allLines = data.split(/\r\n|\n/);
-    let title = "";
-    let end = "";
-    let error = "";
-    // Reading line by line
+    let title = "",
+      end = "",
+      error = "";
+
     try {
       allLines.forEach((line) => {
         if (line) {
           if (line.match(/^#/gm)) {
-            const hash: any = line.match(/# (.*)/);
-            title = hash[1];
+            const hash = line.match(/# (.*)/);
+            title = hash ? hash[1] : "";
           } else if (line.match(/^_/gm)) {
-            const underscore: any = line.match(/_(.*)_/);
-            end = underscore[1];
+            const underscore = line.match(/_(.*)_/);
+            end = underscore ? underscore[1] : "";
           } else if (line.match(/^!/gm)) {
             id += 1;
-            const imgUrl: any = line.match(/\((.*)\)/);
-            story.push({
-              id,
-              url: imgUrl[1],
-              text: "",
-            });
+            const imgUrl = line.match(/\((.*)\)/);
+            story.push({ id, url: imgUrl ? imgUrl[1] : "", text: "" });
           } else {
             story[id - 1].text = line;
           }
@@ -88,34 +118,26 @@ export class OBSWidget extends ReactWidget {
       end = "";
       story = [];
     }
-
     return { title, story, end, error };
-  };
+  }
 
-  protected async fetchStoryContent(title: string): Promise<any> {
+  async fetchStoryContent(title: string): Promise<any[]> {
     try {
       const response = await fetch(
         `https://git.door43.org/Door43-Catalog/hi_obs/raw/branch/master/content/${title}.md`
       );
       if (response.ok) {
         const content = await response.text();
-        console.log("content", content);
         const json = this.MdToJson(content);
-        console.log("json", json);
         json.story.unshift({ id: 0, title: json.title });
-        json.story.push({
-          id: json.story.length + 1,
-          end: json.end,
-        });
+        json.story.push({ id: json.story.length + 1, end: json.end });
         return json.story;
-
-        // return marked(content); // Return the parsed markdown content
       } else {
-        return "Failed to load content.";
+        return [{ text: "Failed to load content." }];
       }
     } catch (error) {
       console.error("Error fetching story content:", error);
-      return "Error fetching content.";
+      return [{ text: "Error fetching content." }];
     }
   }
 
@@ -124,7 +146,7 @@ export class OBSWidget extends ReactWidget {
       <div style={{ height: "100%", overflowY: "auto" }}>
         {this.obsStory.map((story, index) => (
           <div key={story.id}>
-            {Object.prototype.hasOwnProperty.call(story, "title") && (
+            {story.title && (
               <div
                 className="flex m-4 p-1 rounded-md min-h-0"
                 style={{ display: "flex", margin: "10px 0 10px 0" }}
@@ -132,20 +154,14 @@ export class OBSWidget extends ReactWidget {
               >
                 <textarea
                   name={story.title}
-                  // onChange={(e) =>
-                  // 	updateSection(e.target.value, story.id)
-                  // }
-                  // onKeyDown={avoidEnter}
-                  // onClick={() => setSelectedStory(scrollLock === true ? 0 : story.id)}
                   value={story.title}
                   data-id={story.id}
-                  className="flex-grow text-justify ml-2 p-2 text-xl"
                   style={{
                     fontFamily: "sans-serif",
                     fontSize: `1rem`,
                     flexGrow: 1,
                     resize: "none",
-                    margin: "0 5px 0 5px",
+                    margin: "0 5px",
                   }}
                 />
                 <button
@@ -166,11 +182,32 @@ export class OBSWidget extends ReactWidget {
                 >
                   Text to Speech
                 </button>
+                <button
+                  style={{
+                    margin: "auto 0 auto 0",
+                    padding: "10px",
+                    fontSize: "14px",
+                    fontWeight: "bold",
+                    color: "#fff",
+                    backgroundColor: "#2e86de",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    transition: "background-color 0.3s ease",
+                    textTransform: "capitalize",
+                  }}
+                  onClick={() => this.toggleRecording(story.id, "title")}
+                >
+                  {this.isRecording &&
+                  this.recordingPart === "title" &&
+                  this.recordingStoryId === story.id
+                    ? "Stop Recording"
+                    : "Record"}
+                </button>
               </div>
             )}
-            {Object.prototype.hasOwnProperty.call(story, "text") && (
+            {story.text && (
               <div
-                className="flex m-4 p-1 rounded-md"
                 style={{ display: "flex", margin: "10px 0 10px 0" }}
                 key={story.id}
               >
@@ -183,11 +220,7 @@ export class OBSWidget extends ReactWidget {
                     color: "#2e86de",
                   }}
                 >
-                  {/* {index} */}
-                  {index
-                    .toString()
-                    .split("")
-                    .map((num) => num)}
+                  {index}
                 </span>
                 <img
                   src={story.url}
@@ -196,21 +229,14 @@ export class OBSWidget extends ReactWidget {
                 />
                 <textarea
                   name={story.text}
-                  // onChange={(e) =>
-                  // 	updateSection(e.target.value, story.id)
-                  // }
-                  // onKeyDown={avoidEnter}
-                  // onClick={() => setSelectedStory(scrollLock === true ? 0 : story.id)}
                   value={story.text}
                   data-id={story.id}
-                  className="flex-grow text-justify ml-2 p-2 text-sm"
                   style={{
                     fontFamily: "sans-serif",
-                    flexGrow: 1,
                     fontSize: `1rem`,
-                    lineHeight: 1.5,
+                    flexGrow: 1,
                     resize: "none",
-                    margin: "0 5px 0 5px",
+                    margin: "0 5px",
                   }}
                   rows={4}
                 />
@@ -232,32 +258,46 @@ export class OBSWidget extends ReactWidget {
                 >
                   Text to Speech
                 </button>
+                <button
+                  style={{
+                    margin: "auto 0 auto 0",
+                    padding: "10px",
+                    fontSize: "14px",
+                    fontWeight: "bold",
+                    color: "#fff",
+                    backgroundColor: "#2e86de",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    transition: "background-color 0.3s ease",
+                    textTransform: "capitalize",
+                  }}
+                  onClick={() => this.toggleRecording(story.id, "text")}
+                >
+                  {this.isRecording &&
+                  this.recordingPart === "text" &&
+                  this.recordingStoryId === story.id
+                    ? "Stop Recording"
+                    : "Record"}
+                </button>
               </div>
             )}
-            {Object.prototype.hasOwnProperty.call(story, "end") && (
+            {story.end && (
               <div
-                className="flex m-4 p-1 rounded-md min-h-0"
                 style={{ display: "flex", margin: "10px 0 10px 0" }}
                 key={story.id}
               >
                 <textarea
                   name={story.end}
-                  // onChange={(e) =>
-                  // 	updateSection(e.target.value, story.id)
-                  // }
-                  // onKeyDown={avoidEnter}
-                  // onClick={() => setSelectedStory(scrollLock === true ? 0 : story.id)}
-                  value={story.end}
-                  data-id={story.id}
-                  className="flex-grow text-justify ml-2 p-2 text-sm"
                   style={{
-                    flexGrow: 1,
                     fontFamily: "sans-serif",
                     fontSize: `1rem`,
-                    lineHeight: 1.5,
+                    flexGrow: 1,
                     resize: "none",
-                    margin: "0 5px 0 5px",
+                    margin: "0 5px",
                   }}
+                  value={story.end}
+                  data-id={story.id}
                 />
                 <button
                   style={{
@@ -276,6 +316,28 @@ export class OBSWidget extends ReactWidget {
                   onClick={() => this.TTSinstance.fetchData(story.end)}
                 >
                   Text to Speech
+                </button>
+                <button
+                  style={{
+                    margin: "auto 0 auto 0",
+                    padding: "10px",
+                    fontSize: "14px",
+                    fontWeight: "bold",
+                    color: "#fff",
+                    backgroundColor: "#2e86de",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer",
+                    transition: "background-color 0.3s ease",
+                    textTransform: "capitalize",
+                  }}
+                  onClick={() => this.toggleRecording(story.id, "end")}
+                >
+                  {this.isRecording &&
+                  this.recordingPart === "end" &&
+                  this.recordingStoryId === story.id
+                    ? "Stop Recording"
+                    : "Record"}
                 </button>
               </div>
             )}

@@ -30,7 +30,8 @@
   },
   "theiaExtensions": [
     {
-      "frontend": "lib/browser/OBSExplorer-frontend-module"
+      "frontend": "lib/browser/OBSExplorer-frontend-module",
+      "backend": "lib/node/backend-module"
     }
   ]
 }

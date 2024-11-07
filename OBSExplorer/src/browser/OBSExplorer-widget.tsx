@@ -6,10 +6,13 @@ import { Message, WidgetManager } from '@theia/core/lib/browser';
 import { ApplicationShell } from '@theia/core/lib/browser/shell/application-shell';
 // import { OBSEditorWidgetWidget } from 'OBSEditorWidget/src/browser/OBSEditorWidget-widget'
 import { OBSWidget } from './obs-widget';
+import { FFmpegServer } from '../common/audio-backend-service';
 @injectable()
 export class OBSExplorerWidget extends ReactWidget {
     static readonly ID = 'OBSExplorer:widget';
     static readonly LABEL = 'OBSExplorer Widget';
+    @inject(FFmpegServer)
+    protected readonly server: FFmpegServer;
 
     @inject(MessageService)
     protected readonly messageService!: MessageService;

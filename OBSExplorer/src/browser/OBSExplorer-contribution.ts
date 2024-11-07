@@ -1,9 +1,9 @@
-import { injectable } from '@theia/core/shared/inversify';
+import { injectable ,inject} from '@theia/core/shared/inversify';
 import { MenuModelRegistry } from '@theia/core';
 import { OBSExplorerWidget } from './OBSExplorer-widget';
 import { AbstractViewContribution } from '@theia/core/lib/browser';
 import { Command, CommandRegistry } from '@theia/core/lib/common/command';
-
+import { FFmpegServer } from '../common/audio-backend-service';
 export const OBSExplorerCommand: Command = { id: 'OBSExplorer:command' };
 
 @injectable()
@@ -17,6 +17,9 @@ export class OBSExplorerContribution extends AbstractViewContribution<OBSExplore
      * its location `area` (`main`, `left`, `right`, `bottom`), `mode`, and `ref`.
      * 
      */
+    @inject(FFmpegServer)
+    protected readonly server: FFmpegServer;
+
     constructor() {
         super({
             widgetId: OBSExplorerWidget.ID,
