@@ -53,24 +53,13 @@ export class Texttospeech {
           method: "GET",
           headers: this.headersList,
         });
-        console.log("Response", await response);
-
         let result = await response.json();
-        console.log(JSON.stringify(result), result.data.status, "Job Status");
-
         if (result.data.status === "job finished") {
-          console.log("Job is finished! Preparing to download the audio...");
-
           this.downloadAudioFile(jobId, storyId, storyTitle);
-
           break;
         } else if (result.data.status === "failed") {
-          console.error("Job failed.");
           break;
         } else {
-          console.log(
-            "Job is still processing, checking again in 5 seconds..."
-          );
           await new Promise((resolve) => setTimeout(resolve, 5000));
         }
       }
@@ -95,8 +84,6 @@ export class Texttospeech {
       );
 
       let jobid = await response.json();
-      console.log("Job ID:", jobid.data.jobId);
-
       this.checkJobStatus(jobid.data.jobId, storyId, storyTitle);
     } catch (error) {
       console.error("Error fetching data:", error);

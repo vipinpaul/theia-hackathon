@@ -9,7 +9,8 @@
     "src"
   ],
   "dependencies": {
-    "@theia/core": "latest"
+    "@theia/core": "latest",
+    "OBSExplorer":"0.0.0"
   },
   "devDependencies": {
     "rimraf": "latest",
@@ -24,6 +25,6 @@
   "theiaExtensions": [
     {
       "frontend": "lib/browser/audio-extension-frontend-module"
-    }
+     }
   ]
 }

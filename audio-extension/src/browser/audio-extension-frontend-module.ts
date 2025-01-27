@@ -1,12 +1,27 @@
-/**
- * Generated using theia-extension-generator
- */
-import { ContainerModule } from '@theia/core/shared/inversify';
-import { AudioExtensionContribution } from './audio-extension-contribution';
-import { Texttospeech } from './Texttospeech';
+import { ContainerModule } from "@theia/core/shared/inversify";
+import {
+  bindViewContribution,
+  FrontendApplicationContribution,
+  WidgetFactory,
+} from "@theia/core/lib/browser";
+import { AudioContribution } from "./audio-extension-contribution";
+import { AudioWidget } from "./audio-widget";
 
 export default new ContainerModule((bind) => {
-	// Replace this line with the desired binding, e.g. "bind(CommandContribution).to(AudioExtensionContribution)
-	bind(AudioExtensionContribution).toSelf();
-	bind(Texttospeech).toSelf();
+
+  bindViewContribution(bind, AudioContribution);
+  bind(FrontendApplicationContribution).toService(AudioContribution);
+
+  bind(AudioWidget).toSelf();
+
+  bind(WidgetFactory)
+    .toDynamicValue((ctx) => {
+      return {
+        id: AudioWidget.ID,
+        createWidget: () => {
+          return ctx.container.get<AudioWidget>(AudioWidget);
+        },
+      };
+    })
+    .inSingletonScope();
 });

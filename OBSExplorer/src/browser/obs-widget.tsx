@@ -7,7 +7,6 @@ import { ReactWidget } from "@theia/core/lib/browser/widgets/react-widget";
 import React = require("react");
 import { MessageService } from "@theia/core";
 import { FFmpegServer } from "../common/audio-backend-service";
-import { Texttospeech } from "audio-extension/lib/browser/Texttospeech";
 
 @injectable()
 export class OBSWidget extends ReactWidget {
@@ -29,7 +28,7 @@ export class OBSWidget extends ReactWidget {
   protected playingAudio: { [key: string]: boolean } = {};
   public obsStory: any[] = [];
 
-  public TTSinstance = new Texttospeech(this.messageService);
+  // public TTSinstance = new Texttospeech(this.messageService);
   protected showDevicePopup: boolean = false;
   protected availableDevices: string[] = [];
 
@@ -265,13 +264,13 @@ export class OBSWidget extends ReactWidget {
                     transition: "background-color 0.3s ease",
                     textTransform: "capitalize",
                   }}
-                  onClick={() =>
-                    this.TTSinstance.fetchData(
-                      story.title,
-                      story.id,
-                      this.storyTitle
-                    )
-                  }
+                  // onClick={() =>
+                  //   this.TTSinstance.fetchData(
+                  //     story.title,
+                  //     story.id,
+                  //     this.storyTitle
+                  //   )
+                  // }
                 >
                   <img
                     width="15px"
@@ -361,6 +360,8 @@ export class OBSWidget extends ReactWidget {
                         src="../../../icons/trash-solid.svg"
                       ></img>
                     </button>
+
+                      <button onClick={()=>this.server.mergeAudio("01")}>Merge</button>
                   </>
                 )}
               </div>
@@ -419,13 +420,13 @@ export class OBSWidget extends ReactWidget {
                     transition: "background-color 0.3s ease",
                     textTransform: "capitalize",
                   }}
-                  onClick={() =>
-                    this.TTSinstance.fetchData(
-                      story.title,
-                      story.id,
-                      this.storyTitle
-                    )
-                  }
+                  // onClick={() =>
+                  //   this.TTSinstance.fetchData(
+                  //     story.title,
+                  //     story.id,
+                  //     this.storyTitle
+                  //   )
+                  // }
                 >
                   <img
                     width="15px"
@@ -555,13 +556,13 @@ export class OBSWidget extends ReactWidget {
                     transition: "background-color 0.3s ease",
                     textTransform: "capitalize",
                   }}
-                  onClick={() =>
-                    this.TTSinstance.fetchData(
-                      story.title,
-                      story.id,
-                      this.storyTitle
-                    )
-                  }
+                  // onClick={() =>
+                  //   this.TTSinstance.fetchData(
+                  //     story.title,
+                  //     story.id,
+                  //     this.storyTitle
+                  //   )
+                  // }
                 >
                   <img
                     width="15px"

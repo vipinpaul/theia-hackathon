@@ -3,7 +3,7 @@ import {
   FFmpegServer,
   RecordingOptions,
 } from "../common/audio-backend-service";
-import { spawn, ChildProcess, execSync } from "child_process";
+import { spawn, execSync, ChildProcess } from "child_process";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs/promises";
@@ -11,14 +11,82 @@ import * as fs from "fs/promises";
 @injectable()
 export class FFmpegServerImpl implements FFmpegServer {
   private recordingProcess: ChildProcess | null = null;
-  private readonly outputDir: string;
-  private readonly ffmpegPath: string;
+  private playbackProcess: ChildProcess | null = null;
+  private playlist: string[] = [];
+  private currentPlaybackIndex: number = 0;
+  private currentOutputFile: string | null = null;
+  private readonly outputDir = path.join(
+    __dirname,
+    "../../../audio-recordings"
+  );
+  private readonly ffmpegPath = this.getPlatformSpecificFFmpegPath();
+
+  private currentPlaybackFile: string | null = null;
 
   constructor() {
-    this.outputDir = path.join(__dirname, "../../../audio-recordings");
-    this.ffmpegPath = this.getPlatformSpecificFFmpegPath();
-    this.setupOutputDirectory().catch(console.error);
-    this.checkFFmpegInstallation().catch(console.error);
+    this.setupOutputDirectory();
+    this.checkFFmpegInstallation();
+  }
+
+  async getAudioFiles(): Promise<string[]> {
+    try {
+      const files = await fs.readdir(this.outputDir);
+      return files
+        .filter((file) => file.endsWith(".wav"))
+        .map((file) => path.join(this.outputDir, file));
+    } catch (error) {
+      console.error("Error reading audio files:", error);
+      return [];
+    }
+  }
+
+  async mergeAudio(storyId: string): Promise<string> {
+    const files = await this.getAudioFiles();
+    const storyFiles = files.filter((f) => f.includes(storyId));
+    if (storyFiles.length === 0) {
+      throw new Error("No audio files found for story");
+    }
+
+    const outputFile = path.join(this.outputDir, `merged-${storyId}.wav`);
+    const fileList = path.join(this.outputDir, "filelist.txt");
+
+    await fs.writeFile(
+      fileList,
+      storyFiles.map((f) => `file '${f}'`).join("\n")
+    );
+
+    return new Promise((resolve, reject) => {
+      const process = spawn(this.ffmpegPath, [
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        fileList,
+        "-c",
+        "copy",
+        outputFile,
+      ]);
+
+      process.on("close", (code) => {
+        fs.unlink(fileList).catch(console.error);
+        if (code === 0) {
+          resolve(outputFile);
+        } else {
+          reject(new Error(`FFmpeg exited with code ${code}`));
+        }
+      });
+    });
+  }
+
+  getFFmpegPath(): Promise<string> {
+    throw new Error("Method not implemented.");
+  }
+  setClient(client: void | undefined): void {
+    throw new Error("Method not implemented.");
+  }
+  getClient?(): void | undefined {
+    throw new Error("Method not implemented.");
   }
 
   private getPlatformSpecificFFmpegPath(): string {
@@ -38,30 +106,19 @@ export class FFmpegServerImpl implements FFmpegServer {
   private async setupOutputDirectory(): Promise<void> {
     try {
       await fs.mkdir(this.outputDir, { recursive: true });
-      console.log("Output directory created/verified at:", this.outputDir);
     } catch (err) {
-      console.error("Error creating output directory:", err);
+      console.error("Failed to create output directory:", err);
       throw new Error("Failed to create output directory");
     }
-  }
-
-  async getFFmpegPath(): Promise<string> {
-    if (!this.ffmpegPath) {
-      throw new Error("FFmpeg binary not found");
-    }
-    console.log("FFmpeg path:", this.ffmpegPath);
-    return this.ffmpegPath;
   }
 
   private async checkFFmpegInstallation(): Promise<void> {
     try {
       await fs.access(this.ffmpegPath, fs.constants.X_OK);
-      const versionOutput = execSync(`${this.ffmpegPath} -version`).toString();
-      console.log("FFmpeg is working:\n", versionOutput);
-    } catch (error) {
-      console.log(this.ffmpegPath, "path");
-      console.error("Error accessing or executing FFmpeg:", error);
-      throw new Error("FFmpeg binary is not accessible or not working");
+      execSync(`${this.ffmpegPath} -version`);
+    } catch (err) {
+      console.error("FFmpeg installation check failed:", err);
+      throw new Error("FFmpeg is not installed or not functioning correctly");
     }
   }
 
@@ -74,104 +131,154 @@ export class FFmpegServerImpl implements FFmpegServer {
             "audio=@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_{0891B2D9-6D3E-4A0B-8030-6E5118AA574B}",
         };
       case "linux":
-        return {
-          format: "alsa",
-          device: "default",
-        };
+        return { format: "alsa", device: "default" };
       case "darwin":
-        return {
-          format: "avfoundation",
-          device: "0",
-        };
-
+        return { format: "avfoundation", device: "0" };
       default:
         throw new Error("Unsupported OS platform for FFmpeg");
     }
   }
 
-  async listAudioInputDevices(): Promise<void> {
-    const listCommand = [
-      this.ffmpegPath,
-      "-list_devices",
-      "true",
-      "-f",
-      "dshow",
-      "-i",
-      "dummy",
-    ];
-    console.log(
-      "Listing audio input devices with command:",
-      listCommand.join(" ")
-    );
+  async generateWaveform(audioFile: string): Promise<string> {
+    const waveformOutput = audioFile.replace(".wav", "-waveform.png");
 
-    try {
-      const output = execSync(listCommand.join(" "), {
-        stdio: "pipe",
-      }).toString();
-      console.log("Available audio input devices:\n", output);
-    } catch (error) {
-      console.error("Failed to list audio input devices:", error);
-      throw new Error("Error listing audio input devices");
-    }
-  }
-
-  async listAudioDevices(): Promise<string[]> {
     return new Promise((resolve, reject) => {
-      const listCommand = [
-        "-list_devices",
-        "true",
-        "-f",
-        "dshow",
-        "-i",
-        "dummy",
-      ];
+      try {
+        const command = [
+          "-i",
+          audioFile,
+          "-filter_complex",
+          "aformat=channel_layouts=mono,showwavespic=s=2560x480:colors=#4CAF50",
+          "-frames:v",
+          "1",
+          "-y",
+          waveformOutput,
+        ];
 
-      const process = spawn(this.ffmpegPath, listCommand);
+        const process = spawn(this.ffmpegPath, command);
 
-      const devices: string[] = [];
-      process.stderr.on("data", (data) => {
-        const output = data.toString();
-        if (output.includes("DirectShow")) {
-          devices.push(output);
-        }
-      });
+        process.stderr?.on("data", (data) => {
+          console.error("FFmpeg waveform stderr:", data.toString());
+        });
 
-      process.on("exit", (code) => {
-        if (code === 0) {
-          resolve(devices);
-        } else {
-          reject("Failed to list devices");
-        }
-      });
+        process.on("error", (err) => {
+          console.error("Waveform generation error:", err);
+          reject(new Error(`Waveform generation failed: ${err.message}`));
+        });
+
+        process.on("exit", (code) => {
+          if (code === 0) {
+            resolve(waveformOutput);
+          } else {
+            reject(new Error("Failed to generate waveform image"));
+          }
+        });
+      } catch (error) {
+        console.error("Failed to generate waveform:", error);
+        reject(error);
+      }
     });
   }
 
+  async playAudio(filePath: string): Promise<void> {
+    console.log("Starting playAudio function");
+    console.log("File path:", filePath);
+    console.log("Platform:", os.platform());
+
+    try {
+      await fs.access(filePath);
+      console.log("File exists and is accessible");
+    } catch (error) {
+      console.error("File access error:", error);
+      throw new Error(`Audio file not accessible: ${filePath}`);
+    }
+
+    if (this.playbackProcess) {
+      console.log("Stopping existing playback");
+      await this.stopAudio();
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        let command: string;
+        let args: string[];
+
+        switch (os.platform()) {
+          case "win32":
+            command = "powershell";
+            args = [
+              "-c",
+              `(New-Object System.Media.SoundPlayer '${filePath}').PlaySync()`,
+            ];
+            console.log("Windows command:", command);
+            console.log("Windows args:", args);
+            break;
+          case "darwin":
+            command = "afplay";
+            args = [filePath];
+            break;
+          case "linux":
+            command = "aplay";
+            args = [filePath];
+            break;
+          default:
+            throw new Error("Unsupported platform for audio playback");
+        }
+
+        console.log("Spawning process with command:", command);
+        console.log("Arguments:", args);
+
+        this.currentPlaybackFile = filePath;
+        this.playbackProcess = spawn(command, args);
+
+        this.playbackProcess.stdout?.on("data", (data) => {
+          console.log("Playback stdout:", data.toString());
+        });
+
+        this.playbackProcess.stderr?.on("data", (data) => {
+          console.error("Playback stderr:", data.toString());
+        });
+
+        this.playbackProcess.on("error", (err) => {
+          console.error("Playback spawn error:", err);
+          console.error("Error code:", (err as NodeJS.ErrnoException).code);
+          console.error("Error path:", (err as NodeJS.ErrnoException).path);
+          console.error(
+            "Error syscall:",
+            (err as NodeJS.ErrnoException).syscall
+          );
+          this.playbackProcess = null;
+          reject(err);
+        });
+
+        this.playbackProcess.on("close", (code, signal) => {
+          console.log("Playback process closed");
+          console.log("Exit code:", code);
+          console.log("Signal:", signal);
+          this.playbackProcess = null;
+          if (code === 0 || code === null) {
+            resolve();
+          } else {
+            reject(new Error(`Playback process exited with code ${code}`));
+          }
+        });
+      } catch (error) {
+        console.error("Unexpected error in playAudio:", error);
+        this.playbackProcess = null;
+        reject(error);
+      }
+    });
+  }
   async startRecording(options: RecordingOptions = {}): Promise<string> {
     if (this.recordingProcess) {
       throw new Error("Recording already in progress");
     }
 
-    try {
-      await fs.access(this.ffmpegPath, fs.constants.X_OK);
-    } catch (error) {
-      throw new Error("FFmpeg binary not accessible");
-    }
-
-    // const outputFile = path.join(this.outputDir, `story-${storyId}.wav`);
     const audioInput = this.getAudioInputFormat();
-
-    const outputFile = path.join(
+    this.currentOutputFile = path.join(
       this.outputDir,
-      options.filename
-        ? `story-${options.filename}.wav`
-        : `story-${options.storyId ?? "default"}.wav`
+      `story-${options.storyId ?? "default"}.wav`
     );
-
-    console.log("Starting recording with options:", {
-      format: options.format || audioInput.format,
-      device: options.device || audioInput.device,
-      outputFile,
-    });
 
     const command = [
       "-f",
@@ -185,103 +292,206 @@ export class FFmpegServerImpl implements FFmpegServer {
       "-ac",
       "1",
       "-y",
-      outputFile,
+      this.currentOutputFile,
     ];
 
     if (os.platform() === "win32") {
       command.splice(2, 0, "-audio_buffer_size", "50");
     }
 
-    console.log("Using FFmpeg binary at:", this.ffmpegPath);
-    console.log("FFmpeg command:", command.join(" "));
-
     return new Promise((resolve, reject) => {
       try {
         this.recordingProcess = spawn(this.ffmpegPath, command);
 
-        console.log(
-          "Recording process started with PID:",
-          this.recordingProcess.pid
-        );
-
-        this.recordingProcess.stderr?.on("data", (data: Buffer) => {
-          const output = data.toString();
-          if (!output.includes("frame=") && !output.includes("size=")) {
-            console.log("FFmpeg output:", output);
-          }
+        this.recordingProcess.stderr?.on("data", (data) => {
+          console.error("FFmpeg stderr:", data.toString());
         });
 
-        this.recordingProcess.on("error", (err: Error) => {
+        this.recordingProcess.on("error", (err) => {
+          console.error("Recording process error:", err);
           this.recordingProcess = null;
+          this.currentOutputFile = null;
           reject(new Error(`Recording failed: ${err.message}`));
         });
 
-        this.recordingProcess.on(
-          "exit",
-          (code: number | null, signal: string | null) => {
-            if (code !== null && code !== 0) {
-              reject(new Error(`FFmpeg process exited with code ${code}`));
-            } else {
-              resolve(outputFile);
-            }
-          }
-        );
-
-        setTimeout(() => {
-          if (this.recordingProcess?.exitCode !== null) {
-            const error = new Error(
-              "Recording process failed to start or exited prematurely"
-            );
-            this.recordingProcess = null;
-            reject(error);
-          } else {
-            resolve(outputFile);
-          }
-        }, 2000);
+        if (this.currentOutputFile) {
+          resolve(this.currentOutputFile);
+        } else {
+          reject(new Error("Output file path is null"));
+        }
       } catch (error) {
-        reject(new Error(`Failed to start recording: ${error.message}`));
+        console.error("Failed to start recording:", error);
+        this.recordingProcess = null;
+        this.currentOutputFile = null;
+        reject(error);
       }
     });
   }
 
-  async stopRecording(): Promise<void> {
+  async stopRecording(): Promise<string> {
     if (!this.recordingProcess) {
       throw new Error("No recording in progress");
     }
 
-    return new Promise<void>((resolve, reject) => {
-      const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
+    const outputFile = this.currentOutputFile;
+    if (!outputFile) {
+      throw new Error("No output file path available");
+    }
 
-      this.recordingProcess?.once(
-        "exit",
-        (code: number | null, signal: string | null) => {
-          this.recordingProcess = null;
-          resolve();
-        }
-      );
-
-      this.recordingProcess?.once("error", (error: Error) => {
-        this.recordingProcess = null;
-        reject(error);
-      });
-
+    return new Promise((resolve, reject) => {
       try {
-        this.recordingProcess?.kill(signal);
+        const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
+
+        this.recordingProcess?.on("exit", async (code) => {
+          this.recordingProcess = null;
+          this.currentOutputFile = null;
+          if (code === 0 || code === null) {
+            try {
+              await this.generateWaveform(outputFile);
+              resolve(outputFile);
+            } catch (error) {
+              console.error("Failed to generate waveform:", error);
+              resolve(outputFile);
+            }
+          } else {
+            reject(new Error(`Recording process exited with code ${code}`));
+          }
+        });
+
+        this.recordingProcess?.on("error", (err) => {
+          this.recordingProcess = null;
+          this.currentOutputFile = null;
+          reject(err);
+        });
+
+        if (this.recordingProcess) {
+          this.recordingProcess.kill(signal);
+        }
       } catch (error) {
-        reject(new Error(`Failed to stop recording: ${error.message}`));
+        console.error("Failed to stop recording:", error);
+        this.recordingProcess = null;
+        this.currentOutputFile = null;
+        reject(error);
       }
     });
   }
 
-  setClient(): void {}
-  getClient?(): void {
-    return;
+  async stopAudio(): Promise<void> {
+    if (!this.playbackProcess) {
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
+
+        this.playbackProcess?.on("exit", (code) => {
+          this.playbackProcess = null;
+          if (code !== 0 && code !== null) {
+            console.error(`Audio stop process exited with code ${code}`);
+            reject(new Error(`Audio stop process exited with code ${code}`));
+          } else {
+            resolve();
+          }
+        });
+
+        this.playbackProcess?.on("error", (err) => {
+          this.playbackProcess = null;
+          reject(err);
+        });
+
+        this.playbackProcess?.kill(signal);
+      } catch (error) {
+        console.error("Failed to stop audio:", error);
+        this.playbackProcess = null;
+        reject(error);
+      }
+    });
+  }
+
+  async pausePlayback(): Promise<void> {
+    if (!this.playbackProcess) throw new Error("No playback in progress");
+
+    if (os.platform() === "win32") {
+      await this.stopAudio();
+    } else {
+      this.playbackProcess.kill("SIGSTOP");
+    }
+  }
+
+  async resumePlayback(): Promise<void> {
+    if (!this.playbackProcess) {
+      if (this.currentPlaybackFile) {
+        await this.playAudio(this.currentPlaybackFile);
+      } else {
+        throw new Error("No audio file to resume");
+      }
+    } else {
+      if (os.platform() !== "win32") {
+        this.playbackProcess.kill("SIGCONT");
+      }
+    }
+  }
+
+  async seekPlayback(position: number): Promise<void> {
+    if (!this.currentPlaybackFile) throw new Error("No audio file to seek");
+
+    await this.stopAudio();
+    this.playbackProcess = spawn(this.ffmpegPath, [
+      "-ss",
+      position.toString(),
+      "-i",
+      this.currentPlaybackFile,
+      "-f",
+      os.platform() === "win32" ? "dshow" : "alsa",
+      "default",
+    ]);
+  }
+
+  async forwardPlayback(seconds: number = 5): Promise<void> {
+    if (!this.playbackProcess) throw new Error("No playback in progress");
+    this.seekPlayback(seconds);
+  }
+
+  async backwardPlayback(seconds: number = 5): Promise<void> {
+    if (!this.playbackProcess) throw new Error("No playback in progress");
+    this.seekPlayback(-seconds);
+  }
+
+  async addToPlaylist(filePath: string): Promise<void> {
+    this.playlist.push(filePath);
+  }
+
+  async clearPlaylist(): Promise<void> {
+    this.playlist = [];
+    this.currentPlaybackIndex = 0;
+  }
+
+  async playNext(): Promise<void> {
+    if (this.playlist.length === 0) throw new Error("Playlist is empty");
+
+    this.currentPlaybackIndex =
+      (this.currentPlaybackIndex + 1) % this.playlist.length;
+    await this.playAudio(this.playlist[this.currentPlaybackIndex]);
+  }
+
+  async playPrevious(): Promise<void> {
+    if (this.playlist.length === 0) throw new Error("Playlist is empty");
+
+    this.currentPlaybackIndex =
+      (this.currentPlaybackIndex - 1 + this.playlist.length) %
+      this.playlist.length;
+    await this.playAudio(this.playlist[this.currentPlaybackIndex]);
   }
 
   dispose(): void {
     if (this.recordingProcess) {
       this.recordingProcess.kill();
       this.recordingProcess = null;
+    }
+    if (this.playbackProcess) {
+      this.playbackProcess.kill();
+      this.playbackProcess = null;
     }
   }
 }
