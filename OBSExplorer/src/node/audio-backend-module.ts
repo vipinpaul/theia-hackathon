@@ -2,6 +2,7 @@ import { injectable } from "@theia/core/shared/inversify";
 import {
   FFmpegServer,
   RecordingOptions,
+  FileNode,
 } from "../common/audio-backend-service";
 import { spawn, execSync, ChildProcess } from "child_process";
 import * as path from "path";
@@ -15,19 +16,73 @@ export class FFmpegServerImpl implements FFmpegServer {
   private playlist: string[] = [];
   private currentPlaybackIndex: number = 0;
   private currentOutputFile: string | null = null;
-  private readonly outputDir = path.join(
-    __dirname,
-    "../../../audio-recordings"
-  );
+  private outputDir: string = "";
   private readonly ffmpegPath = this.getPlatformSpecificFFmpegPath();
 
   private currentPlaybackFile: string | null = null;
 
   constructor() {
-    this.setupOutputDirectory();
     this.checkFFmpegInstallation();
   }
 
+  async setWorkspacePath(workspacePath: string): Promise<void> {
+    try {
+      this.outputDir = path.join(workspacePath, "audio-recordings");
+      await fs.mkdir(this.outputDir, { recursive: true });
+      console.log("Audio recordings directory set to:", this.outputDir);
+    } catch (error) {
+      console.error("Failed to set workspace path:", error);
+      throw error;
+    }
+  }
+
+  async getFileTree(rootPath: string): Promise<FileNode> {
+    const buildTree = async (dirPath: string): Promise<FileNode[]> => {
+      try {
+        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+        const items = await Promise.all(
+          entries.map(async (entry) => {
+            const fullPath = path.join(dirPath, entry.name);
+            if (entry.isDirectory()) {
+              const children = await buildTree(fullPath);
+              return {
+                name: entry.name,
+                type: "folder" as const,
+                path: fullPath,
+                children,
+              };
+            } else {
+              return {
+                name: entry.name,
+                type: "file" as const,
+                path: fullPath,
+              };
+            }
+          })
+        );
+        return items;
+      } catch (error) {
+        console.error("Error reading directory:", dirPath, error);
+        return [];
+      }
+    };
+
+    try {
+      const audioFolder = path.join(rootPath, "audio-recordings");
+      await fs.access(audioFolder);
+
+      const children = await buildTree(audioFolder);
+      return {
+        name: "audio-recordings",
+        type: "folder",
+        path: audioFolder,
+        children,
+      };
+    } catch (error) {
+      console.error("Failed to get file tree:", error);
+      throw error;
+    }
+  }
   async getAudioFiles(): Promise<string[]> {
     try {
       const files = await fs.readdir(this.outputDir);
@@ -103,15 +158,6 @@ export class FFmpegServerImpl implements FFmpegServer {
     }
   }
 
-  private async setupOutputDirectory(): Promise<void> {
-    try {
-      await fs.mkdir(this.outputDir, { recursive: true });
-    } catch (err) {
-      console.error("Failed to create output directory:", err);
-      throw new Error("Failed to create output directory");
-    }
-  }
-
   private async checkFFmpegInstallation(): Promise<void> {
     try {
       await fs.access(this.ffmpegPath, fs.constants.X_OK);
@@ -178,6 +224,14 @@ export class FFmpegServerImpl implements FFmpegServer {
         reject(error);
       }
     });
+  }
+
+  private validateOutputDir(): void {
+    if (!this.outputDir) {
+      throw new Error(
+        "Workspace path not set. Please call setWorkspacePath first."
+      );
+    }
   }
 
   async playAudio(filePath: string): Promise<void> {
@@ -270,6 +324,7 @@ export class FFmpegServerImpl implements FFmpegServer {
     });
   }
   async startRecording(options: RecordingOptions = {}): Promise<string> {
+    this.validateOutputDir();
     if (this.recordingProcess) {
       throw new Error("Recording already in progress");
     }
@@ -329,19 +384,27 @@ export class FFmpegServerImpl implements FFmpegServer {
   }
 
   async stopRecording(): Promise<string> {
+    console.log("got record stop button");
     if (!this.recordingProcess) {
+      console.log("no recording process");
       throw new Error("No recording in progress");
     }
 
     const outputFile = this.currentOutputFile;
     if (!outputFile) {
+      console.log("no output file process");
       throw new Error("No output file path available");
     }
 
     return new Promise((resolve, reject) => {
+      console.log("got everything");
       try {
+        console.log("Stopping recording process");
         const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
 
+        if (this.recordingProcess) {
+          this.recordingProcess.kill(signal);
+        }
         this.recordingProcess?.on("exit", async (code) => {
           this.recordingProcess = null;
           this.currentOutputFile = null;
@@ -363,10 +426,6 @@ export class FFmpegServerImpl implements FFmpegServer {
           this.currentOutputFile = null;
           reject(err);
         });
-
-        if (this.recordingProcess) {
-          this.recordingProcess.kill(signal);
-        }
       } catch (error) {
         console.error("Failed to stop recording:", error);
         this.recordingProcess = null;
@@ -465,6 +524,25 @@ export class FFmpegServerImpl implements FFmpegServer {
   async clearPlaylist(): Promise<void> {
     this.playlist = [];
     this.currentPlaybackIndex = 0;
+  }
+
+  async deleteFile(path: string): Promise<void> {
+    try {
+      await fs.unlink(path);
+    } catch (error) {
+      console.error("Failed to delete file:", error);
+      throw error;
+    }
+  }
+
+  async createFolder(path: string): Promise<void> {
+    this.validateOutputDir();
+    try {
+      await fs.mkdir(path, { recursive: true });
+    } catch (error) {
+      console.error("Failed to create folder:", error);
+      throw error;
+    }
   }
 
   async playNext(): Promise<void> {

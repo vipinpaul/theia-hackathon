@@ -12,6 +12,15 @@ export interface RecordingOptions {
     filename?: string;
 }
 
+
+export interface FileNode {
+    name: string;
+    type: 'file' | 'folder';
+    path: string;
+    children?: FileNode[];
+}
+
+
 export interface FFmpegServer extends RpcServer<void> {
     startRecording(options?: RecordingOptions): Promise<string>;
     stopRecording(): Promise<string>;
@@ -28,4 +37,8 @@ export interface FFmpegServer extends RpcServer<void> {
     playPrevious(): Promise<void>;
     getAudioFiles(): Promise<string[]>;  
     playAudio(audioFile: string): Promise<void>;
+    deleteFile(path: string): Promise<void>;
+    createFolder(path: string): Promise<void>;
+    getFileTree(rootPath: string): Promise<any>;
+    setWorkspacePath(path: string): Promise<void>;
 }
