@@ -46,12 +46,16 @@ export class AudioWidget extends ReactWidget {
   private isPlaying: boolean = false;
 
   private audioFile: string | undefined = undefined;
-  private waveformFile: string | undefined = undefined;
+  // private waveformFile: string | undefined = undefined;
   private updateTimer?: number;
   private filepath: string | undefined;
   private fileTree: FileNode | null = null;
   private expandedFolders: Set<string> = new Set();
+  private isPaused: boolean = false;
 
+  // ... (keep existing constructor and other methods)
+
+ 
   dispose(): void {
     if (this.updateTimer) {
       window.clearTimeout(this.updateTimer);
@@ -150,7 +154,7 @@ export class AudioWidget extends ReactWidget {
       await this.server.deleteFile(node.path);
       if (node.type === "file" && this.audioFile === node.path) {
         this.audioFile = undefined;
-        this.waveformFile = undefined;
+        // this.waveformFile = undefined;
       }
       await this.initializeFileTree();
     } catch (error) {
@@ -158,32 +162,60 @@ export class AudioWidget extends ReactWidget {
     }
   }
 
-  private async toggleRecording(): Promise<void> {
+  private async togglePause(): Promise<void> {
     try {
       if (this.isRecording) {
-        console.log("stopping recording");
-        const audioFilePath = await this.server.stopRecording();
-        console.log(audioFilePath, "filee");
-        this.audioFile = audioFilePath;
-        this.isRecording = false;
-        this.waveformFile = audioFilePath.replace(".wav", "-waveform.png");
-      } else {
-        const options: RecordingOptions = {
-          sampleRate: 48000,
-          channels: 1,
-          format: "wav",
-          storyId: Date.now(),
-        };
-        await this.server.startRecording(options);
-        this.isRecording = true;
-        this.audioFile = undefined;
-        this.waveformFile = undefined;
+        if (this.isPaused) {
+          await this.server.resumeRecording();
+          this.isPaused = false;
+        } else {
+          await this.server.pauseRecording();
+          this.isPaused = true;
+        }
+        this.update();
       }
-      this.update();
     } catch (error) {
-      console.error("Error toggling recording:", error);
+      console.error("Error toggling pause:", error);
     }
   }
+
+
+  private async toggleRecording(): Promise<void> {
+    try {
+        if (this.isRecording) {
+            console.log("Stopping recording...");
+            const audioFilePath = await this.server.stopRecording();
+            console.log("Received file path:", audioFilePath);
+            
+            if (!audioFilePath) {
+                console.error("Error: stopRecording returned an empty or undefined file path.");
+                return;
+            }
+
+            this.audioFile = audioFilePath;
+            this.isRecording = false;
+            this.isPaused = false;
+            // this.waveformFile = audioFilePath.replace(".wav", "-waveform.png");
+
+        } else {
+            const options: RecordingOptions = {
+                sampleRate: 48000,
+                channels: 1,
+                format: "wav",
+                storyId: Date.now(),
+            };
+            console.log("Starting recording...");
+            await this.server.startRecording(options);
+            this.isRecording = true;
+            this.isPaused = false;
+            this.audioFile = undefined;
+            // this.waveformFile = undefined;
+        }
+        this.update();
+    } catch (error) {
+        console.error("Error toggling recording:", error);
+    }
+}
 
   private async playAudio(): Promise<void> {
     if (!this.audioFile) return;
@@ -368,69 +400,88 @@ export class AudioWidget extends ReactWidget {
 
     return (
       <div style={{ padding: "15px", textAlign: "center" }}>
-        <h2>Audio Recorder</h2>
-        <div style={{ marginBottom: "20px" }}>
-          <p className="status-text">
-            {this.isRecording
-              ? "Recording in progress..."
-              : this.isPlaying
-              ? "Playing audio..."
-              : "Ready to record"}
-          </p>
-        </div>
+      <h2>Audio Recorder</h2>
+      <div style={{ marginBottom: "20px" }}>
+        <p className="status-text">
+          {this.isRecording 
+            ? this.isPaused 
+              ? "Recording paused..."
+              : "Recording in progress..."
+            : this.isPlaying
+            ? "Playing audio..."
+            : "Ready to record"}
+        </p>
+      </div>
 
-        <div className="control-buttons" style={{ marginBottom: "20px" }}>
-          <button
-            onClick={() => this.toggleRecording()}
-            disabled={this.isPlaying}
-            style={{
-              padding: "10px 20px",
-              marginRight: "10px",
-              backgroundColor: this.isRecording ? "#ff4444" : "#4CAF50",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: this.isPlaying ? "not-allowed" : "pointer",
-            }}
-          >
-            {this.isRecording ? "Stop Recording" : "Start Recording"}
-          </button>
+      <div className="control-buttons" style={{ marginBottom: "20px" }}>
+        <button
+          onClick={() => this.toggleRecording()}
+          disabled={this.isPlaying}
+          style={{
+            padding: "10px 20px",
+            marginRight: "10px",
+            backgroundColor: this.isRecording ? "#ff4444" : "#4CAF50",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: this.isPlaying ? "not-allowed" : "pointer",
+          }}
+        >
+          {this.isRecording ? "Stop Recording" : "Start Recording"}
+        </button>
 
-          <button
-            onClick={() => this.playAudio()}
-            disabled={!this.audioFile || this.isRecording || this.isPlaying}
-            style={{
-              padding: "10px 20px",
-              marginRight: "10px",
-              backgroundColor: "#2196F3",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor:
-                !this.audioFile || this.isRecording || this.isPlaying
-                  ? "not-allowed"
-                  : "pointer",
-            }}
-          >
-            Play Audio
-          </button>
+        <button
+          onClick={() => this.togglePause()}
+          disabled={!this.isRecording}
+          style={{
+            padding: "10px 20px",
+            marginRight: "10px",
+            backgroundColor: "#FFA500",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: !this.isRecording ? "not-allowed" : "pointer",
+            opacity: !this.isRecording ? 0.6 : 1,
+          }}
+        >
+          {this.isPaused ? "Resume Recording" : "Pause Recording"}
+        </button>
 
-          <button
-            onClick={() => this.stopPlayback()}
-            disabled={!this.isPlaying}
-            style={{
-              padding: "10px 20px",
-              backgroundColor: "#f44336",
-              color: "white",
-              border: "none",
-              borderRadius: "4px",
-              cursor: !this.isPlaying ? "not-allowed" : "pointer",
-            }}
-          >
-            Stop Playback
+        <button
+          onClick={() => this.playAudio()}
+          disabled={!this.audioFile || this.isRecording || this.isPlaying}
+          style={{
+            padding: "10px 20px",
+            marginRight: "10px",
+            backgroundColor: "#2196F3",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: !this.audioFile || this.isRecording || this.isPlaying ? "not-allowed" : "pointer",
+          }}
+        >
+          Play Audio
+        </button>
+          <button onClick={() => this.server.getAudioDevices()} style={{ padding: "10px 20px", backgroundColor: "#4CAF50", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
+            Devices
           </button>
-        </div>
-        <div className="waveform-container" style={{ marginBottom: "20px" }}>
+        <button
+          onClick={() => this.stopPlayback()}
+          disabled={!this.isPlaying}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#f44336",
+            color: "white",
+            border: "none",
+            borderRadius: "4px",
+            cursor: !this.isPlaying ? "not-allowed" : "pointer",
+          }}
+        >
+          Stop Playback
+        </button>
+      </div>
+
+        {/* <div className="waveform-container" style={{ marginBottom: "20px" }}>
           {this.waveformFile ? (
             <div>
               <h3>Audio Waveform</h3>
@@ -449,7 +500,7 @@ export class AudioWidget extends ReactWidget {
           ) : (
             <p>No waveform available</p>
           )}
-        </div>
+        </div> */}
         {this.audioFile && (
           <div className="audio-info" style={{ marginBottom: "20px" }}>
             <h3>Current Audio File</h3>

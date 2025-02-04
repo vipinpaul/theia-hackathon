@@ -361,7 +361,7 @@ export class OBSWidget extends ReactWidget {
                       ></img>
                     </button>
 
-                      <button onClick={()=>this.server.mergeAudio("01")}>Merge</button>
+                      {/* <button onClick={()=>this.server.mergeAudio("01")}>Merge</button> */}
                   </>
                 )}
               </div>

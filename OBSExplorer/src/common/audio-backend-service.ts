@@ -25,7 +25,7 @@ export interface FFmpegServer extends RpcServer<void> {
     startRecording(options?: RecordingOptions): Promise<string>;
     stopRecording(): Promise<string>;
     getFFmpegPath(): Promise<string>; 
-    mergeAudio(storyId: string): Promise<string>;
+    // mergeAudio(storyId: string): Promise<string>;
     generateWaveform(audioFile: string): Promise<string>;
     stopAudio(): Promise<void>;
     pausePlayback(): Promise<void>;
@@ -41,4 +41,7 @@ export interface FFmpegServer extends RpcServer<void> {
     createFolder(path: string): Promise<void>;
     getFileTree(rootPath: string): Promise<any>;
     setWorkspacePath(path: string): Promise<void>;
+    resumeRecording(): Promise<string>;
+    pauseRecording(): Promise<string>;
+    getAudioDevices(): Promise<string[]>;
 }
