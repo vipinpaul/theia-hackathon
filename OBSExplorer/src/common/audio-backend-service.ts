@@ -25,18 +25,7 @@ export interface FFmpegServer extends RpcServer<void> {
     startRecording(options?: RecordingOptions): Promise<string>;
     stopRecording(): Promise<string>;
     getFFmpegPath(): Promise<string>; 
-    // mergeAudio(storyId: string): Promise<string>;
-    generateWaveform(audioFile: string): Promise<string>;
-    stopAudio(): Promise<void>;
-    pausePlayback(): Promise<void>;
-    resumePlayback(): Promise<void>;
-    seekPlayback(position: number): Promise<void>;
-    forwardPlayback(seconds:number): Promise<void>;
-    backwardPlayback(seconds:number): Promise<void>;
-    playNext(): Promise<void>;
-    playPrevious(): Promise<void>;
     getAudioFiles(): Promise<string[]>;  
-    playAudio(audioFile: string): Promise<void>;
     deleteFile(path: string): Promise<void>;
     createFolder(path: string): Promise<void>;
     getFileTree(rootPath: string): Promise<any>;

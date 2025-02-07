@@ -8,29 +8,20 @@ import { spawn, execSync, ChildProcess } from "child_process";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs/promises";
-
 @injectable()
 export class FFmpegServerImpl implements FFmpegServer {
   private recordingProcess: ChildProcess | null = null;
   private playbackProcess: ChildProcess | null = null;
-  private playlist: string[] = [];
-  private currentPlaybackIndex: number = 0;
   private currentOutputFile: string | null = null;
   private outputDir: string = "";
   private readonly ffmpegPath = this.getPlatformSpecificFFmpegPath();
-
-  private currentPlaybackFile: string | null = null;
-
   private tempRecordings: string[] = [];
   private isRecordingPaused: boolean = false;
   private currentStoryId: string | null = null;
-  private segmentCounter: number = 1; // A
-  private mergeErrors: string = "";
-
+  private segmentCounter: number = 1;
   constructor() {
     this.checkFFmpegInstallation();
   }
-
   async setWorkspacePath(workspacePath: string): Promise<void> {
     try {
       this.outputDir = path.join(workspacePath, "audio-recordings");
@@ -41,7 +32,6 @@ export class FFmpegServerImpl implements FFmpegServer {
       throw error;
     }
   }
-
   async getFileTree(rootPath: string): Promise<FileNode> {
     const buildTree = async (dirPath: string): Promise<FileNode[]> => {
       try {
@@ -72,11 +62,9 @@ export class FFmpegServerImpl implements FFmpegServer {
         return [];
       }
     };
-
     try {
       const audioFolder = path.join(rootPath, "audio-recordings");
       await fs.access(audioFolder);
-
       const children = await buildTree(audioFolder);
       return {
         name: "audio-recordings",
@@ -105,14 +93,11 @@ export class FFmpegServerImpl implements FFmpegServer {
     if (this.recordingProcess && !this.isRecordingPaused) {
       throw new Error("Recording already in progress");
     }
-
     const audioInput = this.getAudioInputFormat();
     this.currentStoryId = options.storyId?.toString() ?? "default";
-
     if (!this.isRecordingPaused && this.tempRecordings.length === 0) {
       this.segmentCounter = 1;
     }
-
     if (!this.isRecordingPaused) {
       this.currentOutputFile = path.join(
         this.outputDir,
@@ -121,7 +106,6 @@ export class FFmpegServerImpl implements FFmpegServer {
         }.wav`
       );
     }
-
     const command = [
       "-f",
       audioInput.format,
@@ -135,34 +119,27 @@ export class FFmpegServerImpl implements FFmpegServer {
       "48000",
       "-ac",
       "1",
-      // "-af",
-      // "highpass=f=50,lowpass=f=15000,silenceremove=1:0:-50dB",
       "-avoid_negative_ts",
       "make_zero",
       "-y",
       this.currentOutputFile!,
     ];
-
     if (os.platform() === "win32") {
       command.splice(2, 0, "-audio_buffer_size", "50");
     }
-
     return new Promise((resolve, reject) => {
       try {
         this.recordingProcess = spawn(this.ffmpegPath, command);
         this.isRecordingPaused = false;
-
         this.recordingProcess.stderr?.on("data", (data) => {
           console.log("FFmpeg stderr:", data.toString());
         });
-
         this.recordingProcess.on("error", (err) => {
           console.error("Recording process error:", err);
           this.recordingProcess = null;
           this.currentOutputFile = null;
           reject(new Error(`Recording failed: ${err.message}`));
         });
-
         if (this.currentOutputFile) {
           resolve(this.currentOutputFile);
         } else {
@@ -177,296 +154,245 @@ export class FFmpegServerImpl implements FFmpegServer {
     });
   }
 
-  // async stopRecording(): Promise<string> {
-  //   if (!this.recordingProcess) {
-  //     throw new Error("No recording in progress");
-  //   }
-
-  //   const killPromise = new Promise<void>((resolve, reject) => {
-  //     const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
-
-  //     this.recordingProcess?.on("exit", (code) => {
-  //       if (code === 0 || code === null) {
-  //         resolve();
-  //       } else {
-  //         reject(new Error(`Recording process exited with code ${code}`));
-  //       }
-  //       this.recordingProcess = null;
-  //     });
-
-  //     this.recordingProcess?.kill(signal);
-  //   });
-
-  //   const timeoutPromise = new Promise<void>((resolve) => {
-  //     setTimeout(() => {
-  //       console.warn(
-  //         "FFmpeg process did not terminate gracefully. Forcing termination."
-  //       );
-  //       this.recordingProcess?.kill("SIGKILL");
-  //       resolve();
-  //     }, 1000);
-  //   });
-
-  //   await Promise.race([killPromise, timeoutPromise]);
-
-  //   if (this.currentOutputFile) {
-  //     this.tempRecordings.push(this.currentOutputFile);
-  //     this.currentOutputFile = null;
-  //   }
-
-  //   if (this.tempRecordings.length > 0) {
-  //     const finalOutputFile = path.join(
-  //       this.outputDir,
-  //       `story-${this.currentStoryId}.wav`
-  //     );
-
-  //     const sortedRecordings = [...this.tempRecordings].sort((a, b) => {
-  //       const segmentA = parseInt(path.basename(a).split("_")[1]);
-  //       const segmentB = parseInt(path.basename(b).split("_")[1]);
-  //       return segmentA - segmentB;
-  //     });
-
-  //     console.log("Sorted recordings:", sortedRecordings);
-
-  //     const fileListPath = path.join(this.outputDir, "filelist.txt");
-  //     await fs.writeFile(
-  //       fileListPath,
-  //       sortedRecordings.map((f) => `file '${f}'`).join("\n")
-  //     );
-
-  //     try {
-  //       await new Promise<void>((resolve, reject) => {
-  //         console.log("Merging files in order:", sortedRecordings);
-
-  //         const mergeProcess = spawn(this.ffmpegPath, [
-  //           "-f",
-  //           "concat",
-  //           "-safe",
-  //           "0",
-  //           "-i",
-  //           fileListPath,
-  //           finalOutputFile,
-  //         ]);
-
-  //         mergeProcess.stderr?.on("data", (data) => {
-  //           console.log("FFmpeg merge stderr:", data.toString());
-  //           this.mergeErrors += data.toString();
-  //         });
-
-  //         mergeProcess.on("close", async (code) => {
-  //           if (code === 0) {
-  //             await Promise.all([
-  //               ...sortedRecordings.map((f) => fs.unlink(f)),
-  //               fs.unlink(fileListPath),
-  //             ]);
-  //             resolve();
-  //           } else {
-  //             reject(
-  //               new Error(
-  //                 `Merge process exited with code ${code}. Stderr: ${this.mergeErrors}`
-  //               )
-  //             );
-  //           }
-  //         });
-  //       });
-
-  //       this.tempRecordings = [];
-  //       this.isRecordingPaused = false;
-  //       this.currentStoryId = null;
-  //       this.segmentCounter = 1;
-
-  //       return finalOutputFile;
-  //     } catch (error) {
-  //       console.error("Failed to merge recordings:", error);
-  //       throw error;
-  //     }
-  //   }
-
-  //   throw new Error("No recordings to process");
-  // }
-
-
   async stopRecording(): Promise<string> {
     if (!this.recordingProcess) {
-        throw new Error("No recording in progress");
+      throw new Error("No recording in progress");
     }
 
-    // Send SIGTERM first to allow graceful shutdown
-    const killPromise = new Promise<void>((resolve, reject) => {
-        let stdErrOutput = '';
-        
-        // Capture any error output
-        this.recordingProcess?.stderr?.on('data', (data) => {
-            stdErrOutput += data.toString();
+    const currentProcess = this.recordingProcess;
+    let processExited = false;
+
+    const killProcess = async (): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        let exitHandled = false;
+
+        const handleExit = () => {
+          if (exitHandled) return;
+          exitHandled = true;
+          processExited = true;
+          this.recordingProcess = null;
+          resolve();
+        };
+
+        currentProcess.on("exit", handleExit);
+        currentProcess.on("error", (err) => {
+          if (!exitHandled) {
+            exitHandled = true;
+            reject(new Error(`Process error: ${err.message}`));
+          }
         });
 
-        // Send q command first (if platform supports it)
-        if (os.platform() !== "win32") {
-            this.recordingProcess?.stdin?.write('q');
-        }
-
-        // Wait a moment for the q command to take effect
-        setTimeout(() => {
-            const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
-
-            this.recordingProcess?.on("exit", (code) => {
-                if (code === 0 || code === null) {
-                    resolve();
-                } else {
-                    reject(new Error(`Recording process exited with code ${code}\nError output: ${stdErrOutput}`));
-                }
-                this.recordingProcess = null;
-            });
-
-            // Send termination signal
-            this.recordingProcess?.kill(signal);
-        }, 500); // Give FFmpeg 500ms to process the q command
-    });
-
-    // Increased timeout to allow for proper file finalization
-    const timeoutPromise = new Promise<void>((_, reject) => {
-        setTimeout(() => {
-            console.warn("FFmpeg process did not terminate gracefully. Forcing termination.");
-            this.recordingProcess?.kill("SIGKILL");
-            reject(new Error("FFmpeg termination timeout"));
-        }, 3000); // Increase timeout to 3 seconds
-    });
-
-    try {
-        await Promise.race([killPromise, timeoutPromise]);
-
-        // Add a small delay after process termination to ensure file system operations are complete
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        if (this.currentOutputFile) {
-            // Verify the file exists and has content
-            const stats = await fs.stat(this.currentOutputFile);
-            if (stats.size === 0) {
-                throw new Error("Recording file is empty");
+        if (os.platform() === "win32") {
+          try {
+            execSync(`taskkill /pid ${currentProcess.pid} /T /F`);
+          } catch (err) {
+            if (!processExited) {
+              currentProcess.kill("SIGKILL");
             }
-            
-            this.tempRecordings.push(this.currentOutputFile);
-            this.currentOutputFile = null;
-        }
+          }
+        } else {
+          try {
+            currentProcess.stdin?.write("q");
+          } catch (err) {
+            console.log(err);
+          }
 
-        if (this.tempRecordings.length > 0) {
-            const finalOutputFile = path.join(
-                this.outputDir,
-                `story-${this.currentStoryId}.wav`
-            );
-
-            const sortedRecordings = [...this.tempRecordings].sort((a, b) => {
-                const segmentA = parseInt(path.basename(a).split("_")[1]);
-                const segmentB = parseInt(path.basename(b).split("_")[1]);
-                return segmentA - segmentB;
-            });
-
-            console.log("Sorted recordings:", sortedRecordings);
-
-            const fileListPath = path.join(this.outputDir, "filelist.txt");
-            await fs.writeFile(
-                fileListPath,
-                sortedRecordings.map((f) => `file '${f}'`).join("\n")
-            );
+          const terminateProcess = async () => {
+            if (processExited) return;
 
             try {
-                await new Promise<void>((resolve, reject) => {
-                    console.log("Merging files in order:", sortedRecordings);
-                    
-                    const mergeProcess = spawn(this.ffmpegPath, [
-                        "-f",
-                        "concat",
-                        "-safe",
-                        "0",
-                        "-i",
-                        fileListPath,
-                        "-y",
-                        finalOutputFile,
-                    ]);
+              currentProcess.kill("SIGTERM");
+              await new Promise((resolve) => setTimeout(resolve, 500));
 
-                    let mergeStderr = '';
-                    mergeProcess.stderr?.on("data", (data) => {
-                        console.log("FFmpeg merge stderr:", data.toString());
-                        mergeStderr += data.toString();
-                        this.mergeErrors += data.toString();
-                    });
-
-                    mergeProcess.on("close", async (code) => {
-                        if (code === 0) {
-                            // Verify the merged file
-                            const stats = await fs.stat(finalOutputFile);
-                            if (stats.size === 0) {
-                                reject(new Error("Merged file is empty"));
-                                return;
-                            }
-
-                            // Clean up temp files
-                            await Promise.all([
-                                ...sortedRecordings.map((f) => fs.unlink(f)),
-                                fs.unlink(fileListPath),
-                            ]);
-                            resolve();
-                        } else {
-                            reject(
-                                new Error(
-                                    `Merge process exited with code ${code}. Stderr: ${mergeStderr}`
-                                )
-                            );
-                        }
-                    });
-                });
-
-                this.tempRecordings = [];
-                this.isRecordingPaused = false;
-                this.currentStoryId = null;
-                this.segmentCounter = 1;
-
-                return finalOutputFile;
-            } catch (error) {
-                console.error("Failed to merge recordings:", error);
-                throw error;
+              if (!processExited) {
+                currentProcess.kill("SIGKILL");
+              }
+            } catch (err) {
+              console.log(err);
             }
+          };
+
+          terminateProcess();
         }
 
+        setTimeout(() => {
+          if (!exitHandled) {
+            exitHandled = true;
+            reject(new Error("Process termination timed out"));
+          }
+        }, 2000);
+      });
+    };
+
+    try {
+      await killProcess();
+      await new Promise((resolve) =>
+        setTimeout(resolve, os.platform() === "win32" ? 1000 : 500)
+      );
+
+      if (!this.currentOutputFile) {
+        throw new Error("No output file available");
+      }
+
+      await fs.stat(this.currentOutputFile);
+      this.tempRecordings.push(this.currentOutputFile);
+      this.currentOutputFile = null;
+
+      if (this.tempRecordings.length === 0) {
         throw new Error("No recordings to process");
+      }
+
+      const finalOutputFile = path.join(
+        this.outputDir,
+        `story-${this.currentStoryId || "default"}.wav`
+      );
+
+      const sortedRecordings = [...this.tempRecordings].sort((a, b) => {
+        const segmentA = parseInt(path.basename(a).split("_")[1]) || 0;
+        const segmentB = parseInt(path.basename(b).split("_")[1]) || 0;
+        return segmentA - segmentB;
+      });
+
+      const fileListPath = path.join(
+        this.outputDir,
+        `filelist_${Date.now()}.txt`
+      );
+      await fs.writeFile(
+        fileListPath,
+        sortedRecordings.map((f) => `file '${f}'`).join("\n")
+      );
+
+      await new Promise<void>((resolve, reject) => {
+        const mergeProcess = spawn(this.ffmpegPath, [
+          "-f",
+          "concat",
+          "-safe",
+          "0",
+          "-i",
+          fileListPath,
+          "-y",
+          finalOutputFile,
+        ]);
+
+        mergeProcess.stderr?.on("data", () => {});
+
+        mergeProcess.on("close", async (code) => {
+          try {
+            if (code === 0) {
+              await Promise.all([
+                ...sortedRecordings.map((f) => fs.unlink(f)),
+                fs.unlink(fileListPath),
+              ]);
+              resolve();
+            } else {
+              reject(new Error(`Merge process failed with code ${code}`));
+            }
+          } catch (error) {
+            reject(error);
+          }
+        });
+      });
+
+      this.tempRecordings = [];
+      this.isRecordingPaused = false;
+      this.currentStoryId = null;
+      this.segmentCounter = 1;
+
+      return finalOutputFile;
     } catch (error) {
-        console.error("Error in stopRecording:", error);
-        throw error;
+      console.error("Error in stopRecording:", error);
+      throw error;
     }
-}
+  }
+
   async pauseRecording(): Promise<string> {
     if (!this.recordingProcess || this.isRecordingPaused) {
       throw new Error("No active recording to pause");
     }
 
-    return new Promise((resolve, reject) => {
-      const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
+    const currentProcess = this.recordingProcess;
+    let processExited = false;
 
-      setTimeout(async () => {
-        this.recordingProcess?.on("exit", async (code) => {
-          if (code === 0 || code === null) {
-            if (this.currentOutputFile) {
-              this.tempRecordings.push(this.currentOutputFile);
-              this.isRecordingPaused = true;
-              this.segmentCounter++;
-              this.recordingProcess = null;
-              resolve(this.currentOutputFile);
-            }
-          } else {
-            reject(new Error(`Recording process exited with code ${code}`));
+    const killProcess = async (): Promise<void> => {
+      return new Promise((resolve, reject) => {
+        let exitHandled = false;
+
+        const handleExit = () => {
+          if (exitHandled) return;
+          exitHandled = true;
+          processExited = true;
+          this.recordingProcess = null;
+          resolve();
+        };
+
+        currentProcess.on("exit", handleExit);
+        currentProcess.on("error", (err) => {
+          if (!exitHandled) {
+            exitHandled = true;
+            reject(new Error(`Process error: ${err.message}`));
           }
         });
 
-        this.recordingProcess?.on("error", (err) => {
-          this.recordingProcess = null;
-          reject(err);
-        });
+        if (os.platform() === "win32") {
+          try {
+            execSync(`taskkill /pid ${currentProcess.pid} /T /F`);
+          } catch (err) {
+            if (!processExited) {
+              currentProcess.kill("SIGKILL");
+            }
+          }
+        } else {
+          try {
+            currentProcess.kill("SIGINT");
 
-        this.recordingProcess?.kill(signal);
-      }, 500);
-    });
+            setTimeout(() => {
+              if (!processExited) {
+                currentProcess.kill("SIGTERM");
+
+                setTimeout(() => {
+                  if (!processExited) {
+                    currentProcess.kill("SIGKILL");
+                  }
+                }, 500);
+              }
+            }, 500);
+          } catch (err) {
+            console.log(err);
+          }
+        }
+
+        setTimeout(() => {
+          if (!exitHandled) {
+            exitHandled = true;
+            reject(new Error("Process termination timed out"));
+          }
+        }, 2000);
+      });
+    };
+
+    try {
+      await killProcess();
+      await new Promise((resolve) =>
+        setTimeout(resolve, os.platform() === "win32" ? 1000 : 500)
+      );
+
+      if (!this.currentOutputFile) {
+        throw new Error("No output file available");
+      }
+
+      await fs.stat(this.currentOutputFile);
+      this.tempRecordings.push(this.currentOutputFile);
+
+      this.isRecordingPaused = true;
+      this.segmentCounter++;
+      const currentFile = this.currentOutputFile;
+      this.currentOutputFile = null;
+      return currentFile;
+    } catch (error) {
+      console.error("Error in pauseRecording:", error);
+      throw error;
+    }
   }
-
   async resumeRecording(): Promise<string> {
     if (!this.isRecordingPaused) {
       throw new Error("No paused recording to resume");
@@ -477,12 +403,10 @@ export class FFmpegServerImpl implements FFmpegServer {
         this.currentStoryId
       }.wav`
     );
-
     return this.startRecording({
       storyId: this.currentStoryId ? parseInt(this.currentStoryId) : undefined,
     });
   }
-
   getFFmpegPath(): Promise<string> {
     throw new Error("Method not implemented.");
   }
@@ -492,7 +416,6 @@ export class FFmpegServerImpl implements FFmpegServer {
   getClient?(): void | undefined {
     throw new Error("Method not implemented.");
   }
-
   private getPlatformSpecificFFmpegPath(): string {
     const ffmpegDir = path.resolve(__dirname, "../../../ffmpeg");
     switch (os.platform()) {
@@ -506,7 +429,6 @@ export class FFmpegServerImpl implements FFmpegServer {
         throw new Error("Unsupported OS platform for FFmpeg");
     }
   }
-
   private async checkFFmpegInstallation(): Promise<void> {
     try {
       await fs.access(this.ffmpegPath, fs.constants.X_OK);
@@ -516,7 +438,6 @@ export class FFmpegServerImpl implements FFmpegServer {
       throw new Error("FFmpeg is not installed or not functioning correctly");
     }
   }
-
   private getAudioInputFormat(): { format: string; device: string } {
     switch (os.platform()) {
       case "win32":
@@ -533,48 +454,6 @@ export class FFmpegServerImpl implements FFmpegServer {
         throw new Error("Unsupported OS platform for FFmpeg");
     }
   }
-
-  async generateWaveform(audioFile: string): Promise<string> {
-    const waveformOutput = audioFile.replace(".wav", "-waveform.png");
-
-    return new Promise((resolve, reject) => {
-      try {
-        const command = [
-          "-i",
-          audioFile,
-          "-filter_complex",
-          "aformat=channel_layouts=mono,showwavespic=s=2560x480:colors=#4CAF50",
-          "-frames:v",
-          "1",
-          "-y",
-          waveformOutput,
-        ];
-
-        const process = spawn(this.ffmpegPath, command);
-
-        process.stderr?.on("data", (data) => {
-          console.error("FFmpeg waveform stderr:", data.toString());
-        });
-
-        process.on("error", (err) => {
-          console.error("Waveform generation error:", err);
-          reject(new Error(`Waveform generation failed: ${err.message}`));
-        });
-
-        process.on("exit", (code) => {
-          if (code === 0) {
-            resolve(waveformOutput);
-          } else {
-            reject(new Error("Failed to generate waveform image"));
-          }
-        });
-      } catch (error) {
-        console.error("Failed to generate waveform:", error);
-        reject(error);
-      }
-    });
-  }
-
   private validateOutputDir(): void {
     if (!this.outputDir) {
       throw new Error(
@@ -582,237 +461,56 @@ export class FFmpegServerImpl implements FFmpegServer {
       );
     }
   }
-
-
-  async playAudio(filePath: string): Promise<void> {
-    console.log("Starting playAudio function");
-    console.log("File path:", filePath);
-    console.log("Platform:", os.platform());
-
-    try {
-      await fs.access(filePath);
-      console.log("File exists and is accessible");
-    } catch (error) {
-      console.error("File access error:", error);
-      throw new Error(`Audio file not accessible: ${filePath}`);
-    }
-
-    if (this.playbackProcess) {
-      console.log("Stopping existing playback");
-      await this.stopAudio();
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        let command: string;
-        let args: string[];
-
-        switch (os.platform()) {
-          case "win32":
-            command = "powershell";
-            args = [
-              "-c",
-              `(New-Object System.Media.SoundPlayer '${filePath}').PlaySync()`,
-            ];
-            console.log("Windows command:", command);
-            console.log("Windows args:", args);
-            break;
-          case "darwin":
-            command = "afplay";
-            args = [filePath];
-            break;
-          case "linux":
-            command = "aplay";
-            args = [filePath];
-            break;
-          default:
-            throw new Error("Unsupported platform for audio playback");
-        }
-
-        console.log("Spawning process with command:", command);
-        console.log("Arguments:", args);
-
-        this.currentPlaybackFile = filePath;
-        this.playbackProcess = spawn(command, args);
-
-        this.playbackProcess.stdout?.on("data", (data) => {
-          console.log("Playback stdout:", data.toString());
-        });
-
-        this.playbackProcess.stderr?.on("data", (data) => {
-          console.error("Playback stderr:", data.toString());
-        });
-
-        this.playbackProcess.on("error", (err) => {
-          console.error("Playback spawn error:", err);
-          console.error("Error code:", (err as NodeJS.ErrnoException).code);
-          console.error("Error path:", (err as NodeJS.ErrnoException).path);
-          console.error(
-            "Error syscall:",
-            (err as NodeJS.ErrnoException).syscall
-          );
-          this.playbackProcess = null;
-          reject(err);
-        });
-
-        this.playbackProcess.on("close", (code, signal) => {
-          console.log("Playback process closed");
-          console.log("Exit code:", code);
-          console.log("Signal:", signal);
-          this.playbackProcess = null;
-          if (code === 0 || code === null) {
-            resolve();
-          } else {
-            reject(new Error(`Playback process exited with code ${code}`));
-          }
-        });
-      } catch (error) {
-        console.error("Unexpected error in playAudio:", error);
-        this.playbackProcess = null;
-        reject(error);
-      }
-    });
-  }
-
   async getAudioDevices(): Promise<string[]> {
     return new Promise((resolve, reject) => {
-        try {
-            const platform = os.platform();
-            const command = [
-                "-list_devices", "true",
-                "-f", platform === "darwin"? "avfoundation": (platform === "win32"? "dshow": "alsa"),
-                "-i", platform === "darwin"? "": "dummy"
-            ];
-
-            const process = spawn(this.ffmpegPath, command);
-            let output = "";
-
-            process.stdout?.on("data", (data) => {
-                output += data.toString();
-            });
-
-            process.stderr?.on("data", (data) => {
-                console.error("FFmpeg stderr:", data.toString());
-                if (platform === "win32") {  // Capture stderr for Windows
-                    output += data.toString();
-                }
-            });
-            console.log(output,"output")
-                  
-            process.on("close", (code) => {
-                if (code === 0) {
-                  console.log(output,"jjooe")
-                    const devices = output.split("\n")
-                      .map(line => {
-                        const match = line.match(/"(.*?)" \[/); // Extract device name between quotes and before [
-                        return match ? match[1] : null; // Extract the device name from the match
-                      })
-                      .filter(device => device !== null) as string[];
-                      console.log("Found audio devices:", devices); // Log the found devices
-                    resolve(devices);
-                } else {
-                    reject(new Error("Failed to get audio devices"));
-                }
-            });
-        } catch (error) {
-            console.error("Error getting audio devices:", error);
-            reject(error);
-        }
-    });
-}
-
-
-  async stopAudio(): Promise<void> {
-    if (!this.playbackProcess) {
-      return;
-    }
-
-    return new Promise((resolve, reject) => {
       try {
-        const signal = os.platform() === "win32" ? "SIGTERM" : "SIGINT";
-
-        this.playbackProcess?.on("exit", (code) => {
-          this.playbackProcess = null;
-          if (code !== 0 && code !== null) {
-            console.error(`Audio stop process exited with code ${code}`);
-            reject(new Error(`Audio stop process exited with code ${code}`));
-          } else {
-            resolve();
+        const platform = os.platform();
+        const command = [
+          "-list_devices",
+          "true",
+          "-f",
+          platform === "darwin"
+            ? "avfoundation"
+            : platform === "win32"
+            ? "dshow"
+            : "alsa",
+          "-i",
+          platform === "darwin" ? "" : "dummy",
+        ];
+        const process = spawn(this.ffmpegPath, command);
+        let output = "";
+        process.stdout?.on("data", (data) => {
+          output += data.toString();
+        });
+        process.stderr?.on("data", (data) => {
+          console.error("FFmpeg stderr:", data.toString());
+          if (platform === "win32") {
+            output += data.toString();
           }
         });
-
-        this.playbackProcess?.on("error", (err) => {
-          this.playbackProcess = null;
-          reject(err);
+        console.log(output, "output");
+        process.on("close", (code) => {
+          if (code === 0) {
+            console.log(output, "jjooe");
+            const devices = output
+              .split("\n")
+              .map((line) => {
+                const match = line.match(/"(.*?)" \[/);
+                return match ? match[1] : null;
+              })
+              .filter((device) => device !== null) as string[];
+            console.log("Found audio devices:", devices);
+            resolve(devices);
+          } else {
+            reject(new Error("Failed to get audio devices"));
+          }
         });
-
-        this.playbackProcess?.kill(signal);
       } catch (error) {
-        console.error("Failed to stop audio:", error);
-        this.playbackProcess = null;
+        console.error("Error getting audio devices:", error);
         reject(error);
       }
     });
   }
-
-  async pausePlayback(): Promise<void> {
-    if (!this.playbackProcess) throw new Error("No playback in progress");
-
-    if (os.platform() === "win32") {
-      await this.stopAudio();
-    } else {
-      this.playbackProcess.kill("SIGSTOP");
-    }
-  }
-
-  async resumePlayback(): Promise<void> {
-    if (!this.playbackProcess) {
-      if (this.currentPlaybackFile) {
-        await this.playAudio(this.currentPlaybackFile);
-      } else {
-        throw new Error("No audio file to resume");
-      }
-    } else {
-      if (os.platform() !== "win32") {
-        this.playbackProcess.kill("SIGCONT");
-      }
-    }
-  }
-
-  async seekPlayback(position: number): Promise<void> {
-    if (!this.currentPlaybackFile) throw new Error("No audio file to seek");
-
-    await this.stopAudio();
-    this.playbackProcess = spawn(this.ffmpegPath, [
-      "-ss",
-      position.toString(),
-      "-i",
-      this.currentPlaybackFile,
-      "-f",
-      os.platform() === "win32" ? "dshow" : "alsa",
-      "default",
-    ]);
-  }
-
-  async forwardPlayback(seconds: number = 5): Promise<void> {
-    if (!this.playbackProcess) throw new Error("No playback in progress");
-    this.seekPlayback(seconds);
-  }
-
-  async backwardPlayback(seconds: number = 5): Promise<void> {
-    if (!this.playbackProcess) throw new Error("No playback in progress");
-    this.seekPlayback(-seconds);
-  }
-
-  async addToPlaylist(filePath: string): Promise<void> {
-    this.playlist.push(filePath);
-  }
-
-  async clearPlaylist(): Promise<void> {
-    this.playlist = [];
-    this.currentPlaybackIndex = 0;
-  }
-
   async deleteFile(path: string): Promise<void> {
     try {
       await fs.unlink(path);
@@ -821,7 +519,6 @@ export class FFmpegServerImpl implements FFmpegServer {
       throw error;
     }
   }
-
   async createFolder(path: string): Promise<void> {
     this.validateOutputDir();
     try {
@@ -831,24 +528,6 @@ export class FFmpegServerImpl implements FFmpegServer {
       throw error;
     }
   }
-
-  async playNext(): Promise<void> {
-    if (this.playlist.length === 0) throw new Error("Playlist is empty");
-
-    this.currentPlaybackIndex =
-      (this.currentPlaybackIndex + 1) % this.playlist.length;
-    await this.playAudio(this.playlist[this.currentPlaybackIndex]);
-  }
-
-  async playPrevious(): Promise<void> {
-    if (this.playlist.length === 0) throw new Error("Playlist is empty");
-
-    this.currentPlaybackIndex =
-      (this.currentPlaybackIndex - 1 + this.playlist.length) %
-      this.playlist.length;
-    await this.playAudio(this.playlist[this.currentPlaybackIndex]);
-  }
-
   dispose(): void {
     if (this.recordingProcess) {
       this.recordingProcess.kill();
